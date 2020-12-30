@@ -2,17 +2,18 @@ import numpy as np
 import itertools
 
 TYPES = {
-	'U'	: -2,
-	'M'	: -1,
-	'C'	:  0,
-	'1'	:  1,
-	'2'	:  2,
-	'3'	:  3,
-	'4'	:  4,
-	'5'	:  5,
-	'6'	:  6,
-	'7'	:  7,
-	'8'	:  8,
+	'U'	: 'U',
+	'M'	: 'M',
+	'C'	: 'C',
+	'0'	: '0',
+	'1'	: '1',
+	'2'	: '2',
+	'3'	: '3',
+	'4'	: '4',
+	'5'	: '5',
+	'6'	: '6',
+	'7'	: '7',
+	'8'	: '8',
 }
 
 REVERSE_TYPES = {str(v): k for k, v in TYPES.items()}
@@ -38,13 +39,13 @@ class Board:
 		"""
 		Creates a board of rows by columns dimensions, all set to ' '
 		"""
-		self.board = np.full((self._rows, self._columns), TYPES['C'], dtype=np.dtype(int))
+		self.board = np.full((self._rows, self._columns), TYPES['C'], dtype=np.dtype(str))
 
 	def _create_player_board(self):
 		"""
 		Creates a board of rows by columns dimensions, all set to ' '
 		"""
-		self.player_board = np.full((self._rows, self._columns), TYPES['C'], dtype=np.dtype(int))
+		self.player_board = np.full((self._rows, self._columns), TYPES['C'], dtype=np.dtype(str))
 
 	def _coordinates(self):
 		"""
@@ -101,18 +102,31 @@ class Board:
 		"""
 		return np.array([board[(coordinate)] for coordinate in neighbors])
 
+	def _str2int(self, str):
+		"""
+		Converts a string to an int if possible, returns None otherwise
+		"""
+		try:
+			return int(str)
+		except ValueError:
+			return None
+
 	def reveal_tile(self, row, column):
 		"""
 		Reveals a tile on the Minesweeper player board.
 		"""
 		tile_value = self.board[(row, column)]
-		if tile_value == TYPES['C']:
+		if tile_value == TYPES['M']:
+			print('GAME OVER!')
+			self.show_player_board()
+			return False
+		elif tile_value == TYPES['C']:
 			self.propogate_uncovered(row, column)
 		else:
 			self.player_board[(row, column)] = tile_value
+		self.create_vectors()
 		self.show_player_board()
-		probs = self.calculate_probabilities()
-		print(probs)
+		self.probabilities()
 
 	def propogate_uncovered(self, row, column):
 		"""
@@ -130,42 +144,149 @@ class Board:
 		for neighbor in neighbors:
 			self.propogate_uncovered(*neighbor)
 
-	def calculate_probabilities(self):
-		# baseline can be overruled by local baseline in either direction
-		# local baselines can overrule local baseline only in greater direction
-		baseline = round(self._remaining_mines / np.count_nonzero(self.player_board == TYPES['C']), 3)
-		probs = np.full((self._rows, self._columns), baseline, dtype=np.dtype(float))
-		for row in range(0, self._rows, 1):
-			for column in range(0, self._columns, 1):
-				# check if tile has value greater than covered tile and update neighbor probs.
-				local_value = self.player_board[(row, column)]
-				if local_value == TYPES['U']:
-					probs[(row, column)] = 0
-				if local_value == TYPES['C']:
-					pass
-					# probs[(row, column)] = np.nanmax([baseline, probs[(row, column)]])
-				elif local_value > TYPES['C']:
-					probs[(row, column)] = 0
-					neighbor_coordinates = self._get_neighbor_coordinates(row, column)
-					neighbor_values = self._get_neighbor_values(self.player_board, neighbor_coordinates)
-					covered_tiles = np.count_nonzero(neighbor_values == TYPES['C'])
-					local_baseline = round(local_value / covered_tiles, 3)
-					for ix, value in enumerate(neighbor_values):
-						if value == TYPES['C']:
-							coordinates = neighbor_coordinates[ix]
-							if probs[coordinates] == baseline:
-								probs[coordinates] = local_baseline
-								print(coordinates, local_baseline)
-							else:
-								probs[coordinates] = np.nanmax([local_baseline, probs[coordinates]])
-		return probs
+	def _non_numerical_types(self):
+		return np.array([TYPES['U'],TYPES['M'],TYPES['C']])
+
+	def create_vectors(self):
+		numbered_locations = np.transpose(np.isin(self.player_board, self._non_numerical_types(), invert=True).nonzero())
+		print("Numbered Locations: ", numbered_locations)
+		vectors = {}
+		for location in numbered_locations:
+			root = ''.join([ str(i) for i in location])
+			mines = self.player_board[tuple(location)]
+			neighbor_coordinates = self._get_neighbor_coordinates(*location)
+			neighbor_values = self._get_neighbor_values(self.player_board, neighbor_coordinates)
+			print('-------')
+			print(neighbor_values)
+			valid_neighbors = []
+			for ix, coord in enumerate(neighbor_coordinates):
+				if neighbor_values[ix] == 'C':
+					valid_neighbors.append(coord)
+			neighbor_coordinates = valid_neighbors
+			vector = ''.join([ str(c) for s in neighbor_coordinates for c in s  ])
+			vectors[root] = {
+				'vector': vector,
+			 	'mines': int(mines)
+			 }
+		self.vectors = vectors
+
+	def split_vector(self, vector):
+		x = []
+		y = []
+		for ix, c in enumerate(vector):
+			if ix % 2:
+				x.append(int(c))
+			else:
+				y.append(int(c))
+		return list(zip(x,y))
+
+	def unique_vector_coordinates(self):
+		coordinates = []
+		for v in self.vectors.values():
+			coordinates = coordinates + self.split_vector(v['vector'])
+		return set(coordinates)
+
+	def possible_states(self):
+		cells = self.unique_vector_coordinates()
+		str_cells = []
+		for cell in cells:
+			c = ''
+			for coord in cell:
+				c += str(coord)
+			str_cells.append(c)
+		cells = str_cells
+		print(cells)
+		scenarios = np.array(list(itertools.product([0,1], repeat=len(cells))))
+		states = []
+		for s in scenarios:
+			temp = list(zip(cells,s))
+			temp_dict = {}
+			for t in temp:
+				temp_dict[t[0]] = int(t[1])
+			states.append(temp_dict)
+		return np.array(states)
+
+	def is_valid_state(self, state):
+		for k,v in self.vectors.items():
+			coords = self.split_vector(v['vector'])
+			vector_sum = 0
+			for coord in coords:
+				vector_sum += state["".join([ str(c) for c in coord])]
+			if v['mines'] != vector_sum:
+				return False
+		return True
+
+	
+	def valid_states(self):
+		states = self.possible_states()
+		valid_states = []
+		for state in states:
+			if self.is_valid_state(state):
+				valid_states.append(state)
+		return valid_states
+
+	def get_non_vector_cells(self, cells):
+		coords = self._coordinates()
+		non_vector_cells = {}
+		for coord in coords:
+			c = ''.join(str(c) for c in coord)
+			if c not in cells.keys() and self.player_board[(coord)] == 'C':
+				non_vector_cells[c] = 0
+		# print('Non-Vector Cells:')
+		# for k in sorted(non_vector_cells.keys()):
+		# 	print(f"{k}: {non_vector_cells[k]}")
+		return non_vector_cells
+
+	def average_number_of_mines(self, states):
+		mines = 0
+		for state in states:
+			mines += sum(state.values())
+		return mines / len(states)
+
+	def best_choice(self, probabilities):
+		lowest_probability = min(probabilities.values())
+		options = [ { k: v } for k,v in probabilities.items() if v == lowest_probability]
+		print(options)
+		rng = np.random.default_rng()
+		choice = rng.choice(options)
+		print(choice)
+		print(probabilities)
+		return choice
+
+	def probabilities(self):
+		states = self.valid_states()
+		cells = {}
+		for state in states:
+			for k,v in state.items():
+				cells[k] = cells.get(k, 0) + v
+		# how many mines in above, on average?
+		mines = sum(cells.values())
+		avg_mines = self.average_number_of_mines(states)
+		print(cells)
+		print('Avg Mines:', avg_mines)
+		other_mines = self._mines - avg_mines
+		for k in cells.keys():
+			cells[k] = cells[k] / len(states)
+		print('\nVector Cells:')
+		for k in sorted(cells.keys()):
+			print(f"{k}: {cells[k]}")
+		
+		nvc = self.get_non_vector_cells(cells)
+		for k in nvc.keys():
+			cells[k] = round(other_mines / len(nvc), 4)
+		print('\nAll Cells:')
+		for k in sorted(cells.keys()):
+			print(f"{k}: {cells[k]}")
+		probabilities = cells
+		print('best choice', self.best_choice(probabilities))
+
 
 
 	def show_board(self):
 		"""
 		Prints a representation of the Minesweeper board.
 		"""
-		print('\n')
+		print('\nBoard:')
 		for row in self.board:
 			print([ REVERSE_TYPES[str(c)] for c in row ])
 
@@ -173,20 +294,17 @@ class Board:
 		"""
 		Prints a representation of the Minesweeper player board.
 		"""
-		print('\n')
+		print('\nPlayer Board')
 		for row in self.player_board:
 			print([ REVERSE_TYPES[str(c)] for c in row ])
 
 
-board = Board(12, 12, 36)
+board = Board(5, 5, 5)
 board.show_board()
-# board.show_player_board()
-print(board.board)
-board.reveal_tile(1,1)
-print(board.player_board)
+board.show_player_board()
+board.reveal_tile(3,3)
 
-
-# TODO: how do we dynamically update probabilities, specifically the baseline?
+# TODO: feed in pre-defined board states?
 
 
 
