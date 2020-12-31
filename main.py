@@ -2,6 +2,8 @@ import numpy as np
 import itertools
 from datetime import datetime
 
+from ui import Screen
+
 start = datetime.now()
 
 TYPES = {
@@ -25,13 +27,17 @@ class Board:
 	"""
 	A representation of a Minesweeper board.
 	"""
-	def __init__(self, board, mines):
+	def __init__(self, rows, columns, mines):
 		"""
 		Initiates board of size rows by columns, with mines
 		"""
-		self.board = np.array(board)
-		(self.rows, self.columns) = self.board.shape
+		self.screen = Screen(rows, columns)
+		self.board = self.screen.capture()
+		self.rows = rows
+		self.columns = columns
 		self.mines = mines
+		self.remaining_tiles = sum(sum( self.board == 'C' ))
+		self.remaining_mines = self.mines - sum([ sum(r == 'M') for r in self.board ])
 
 	def _coordinates(self):
 		"""
@@ -69,9 +75,16 @@ class Board:
 		Calculates the next best move.
 		"""
 		if not self.create_vectors():
-			self.show_board()
 			self.probabilities()
-		self.show_board()
+		self.screen.print_board(self.remaining_tiles, self.remaining_mines)
+		self.board = self.screen.capture()
+		self.remaining_tiles = sum(sum( self.board == 'C' ))
+		# print('Remaining Tiles:', self.remaining_tiles)
+		if (self.remaining_tiles == 0):
+			print('Game Complete!')
+			return False
+		self.remaining_mines = self.mines - sum([ sum(r == 'M') for r in self.board ])
+		self.process_board()
 
 	
 	def _non_numerical_types(self):
@@ -106,16 +119,38 @@ class Board:
 			vectors[root] = {
 				'vector': vector,
 			 	'mines': mines
-			 }
+			}
 
-			if (mines == len(neighbor_coordinates)):
-				print('-'*25)
-				print('100% Mines Found', root, vectors[root])
-				print('-'*25)
-				return True
+			# if (mines == len(neighbor_coordinates)):
+			# 	# print('100% Mines Found', root, vectors[root])
+			# 	for v in self.split_vector(vectors[root]['vector']):
+			# 		cor = self.screen.get_tile_coordinate(*tuple(v))
+			# 		self.screen.right_click(*cor)
+
+			# 	return True
 		self.vectors = vectors
-		# for k,v in self.vectors.items():
-		# 	print(k, v['vector'])
+		targets = []
+		mines = []
+		for k,v in self.vectors.items():
+			if v['mines'] == 0:
+				targets = targets + self.split_vector(v['vector'])
+			if v['mines'] == len(v['vector']) / 2:
+				print(v['vector'], v['mines'])
+				mines = mines + self.split_vector(v['vector'])
+
+		targets = set(targets)
+		mines = set(mines)
+		if len(targets) > 0:
+			for target in targets:
+				cor = self.screen.get_tile_coordinate(*target)
+				self.screen.left_click(*cor)
+		if len(mines) > 0:
+			for mine in mines:
+				cor = self.screen.get_tile_coordinate(*mine)
+				self.screen.right_click(*cor)
+
+		if len(targets) > 0 or len(mines) > 0:
+			return True
 		return False
 
 	def split_vector(self, vector):
@@ -136,7 +171,7 @@ class Board:
 		return set(coordinates)
 
 	def possible_states(self):
-		print('Generating Possible States...', (datetime.now() - start).seconds)
+		print('Generating Possible States...')
 		cells = self.unique_vector_coordinates()
 		str_cells = []
 		for cell in cells:
@@ -164,6 +199,10 @@ class Board:
 		return np.array(states)
 
 	def is_valid_state(self, state):
+		if sum(state.values()) > self.remaining_mines:
+			return False
+		if self.remaining_tiles == len(state) and self.remaining_mines != sum(state.values()):
+			return False
 		for k,v in self.vectors.items():
 			coords = self.split_vector(v['vector'])
 			vector_sum = 0
@@ -180,6 +219,8 @@ class Board:
 		for state in states:
 			if self.is_valid_state(state):
 				valid_states.append(state)
+		for s in valid_states:
+			print(s)
 		return valid_states
 
 	def get_non_vector_cells(self, cells):
@@ -197,16 +238,6 @@ class Board:
 			mines += sum(state.values())
 		return mines / len(states)
 
-	def best_choice(self, probabilities):
-		lowest_probability = min(probabilities.values())
-		options = [ { k: v } for k,v in probabilities.items() if v == lowest_probability]
-		print(options)
-		rng = np.random.default_rng()
-		choice = rng.choice(options)
-		print(choice)
-		print(probabilities)
-		return choice
-
 	def probabilities(self):
 		states = self.valid_states()
 		cells = {}
@@ -214,17 +245,15 @@ class Board:
 			for k,v in state.items():
 				cells[k] = cells.get(k, 0) + v
 		# how many mines in above, on average?
-		mines = sum(cells.values())
 		avg_mines = self.average_number_of_mines(states)
-		print('Avg Mines:', avg_mines)
-
-		marked_mines = len(np.transpose((self.board == 'M').nonzero()))
-		other_mines = self.mines - avg_mines - marked_mines
+		print(avg_mines)
+		other_mines = self.remaining_mines - avg_mines
+		print(other_mines)
 		for k in cells.keys():
 			cells[k] = cells[k] / len(states)
-		# print('\nVector Cells:')
-		# for k in sorted(cells.keys()):
-		# 	print(f"{k}: {cells[k]}")
+		print('\nVector Cells:')
+		for k in sorted(cells.keys()):
+			print(f"{k}: {cells[k]}")
 		
 		nvc = self.get_non_vector_cells(cells)
 		for k in nvc.keys():
@@ -233,110 +262,42 @@ class Board:
 		for k in sorted(cells.keys()):
 			print(f"{k}: {cells[k]}")
 		probabilities = cells
-		print('best choice', self.best_choice(probabilities))
+		clean = []
+		mines = []
+		for k,v in probabilities.items():
+			k = tuple([int(c) for c in str(k)])
+			k = self.screen.get_tile_coordinate(*k)
+			if v == 0:
+				clean.append(k)
+			if v == 1:
+				mines.append(k)
+
+		if len(clean):
+			for c in clean:
+				self.screen.left_click(*c)
+		if len(mines):
+			for m in mines:
+				self.screen.right_click(*m)
+		if len(clean) or len(mines):
+			return True
+		else:
+			lowest_probability = min(probabilities.values())
+			options = [ { k: v } for k,v in probabilities.items() if v == lowest_probability]
+			rng = np.random.default_rng()
+			choice = rng.choice(options)
+			cor = tuple([ int(char) for char in choice[0] ])
+			cor = self.screen.get_tile_coordinate(*cor)
+			self.screen.left_click(*cor)
+			return True
 
 
 
-	def show_board(self):
-		"""
-		Prints a representation of the Minesweeper board.
-		"""
-		print('\nBoard:')
-		for row in self.board:
-			print([ REVERSE_TYPES[str(c)] for c in row ])
 
-
-
-
-# TODO: feed in pre-defined board states?
 # https://www.chiark.greenend.org.uk/~sgtatham/puzzles/js/mines.html#9x9n35#952602088781240
+# examine: https://www.chiark.greenend.org.uk/~sgtatham/puzzles/js/mines.html#9x9n35#111486851880096
 
-test_1 = [
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','3','3','4','C','C'],
-	['C','C','C','C','2','U','1','C','C'],
-	['C','C','C','C','2','U','1','C','C'],
-	['C','C','C','C','4','3','3','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-]
 
-test_2 = [
-	['C','C','C','4','C','C','C','C','C'],
-	['C','C','C','C','3','3','4','C','C'],
-	['C','C','C','C','2','U','1','C','C'],
-	['C','C','C','C','2','U','1','C','C'],
-	['C','C','C','C','4','3','3','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-]
-
-test_3 = [
-	['C','C','M','4','M','C','C','C','C'],
-	['C','C','M','M','3','3','4','C','C'],
-	['C','C','C','C','2','U','1','C','C'],
-	['C','C','C','C','2','U','1','C','C'],
-	['C','C','C','C','4','3','3','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-]
-
-test_4 = [
-	['C','C','M','4','M','M','M','C','C'],
-	['C','C','M','M','3','3','4','C','C'],
-	['C','C','C','C','2','U','1','C','C'],
-	['C','C','C','C','2','U','1','C','C'],
-	['C','C','C','C','4','3','3','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-]
-
-test_5 = [
-	['C','C','M','4','M','M','M','C','C'],
-	['C','C','M','M','3','3','4','C','C'],
-	['C','C','C','C','2','U','1','C','C'],
-	['C','C','C','C','2','U','1','C','C'],
-	['C','C','C','C','4','3','3','C','C'],
-	['C','C','C','C','M','M','M','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-	['C','C','C','C','C','C','C','C','C'],
-]
-
-test_6 = [
-	['1','3','M','4','M','M','M','C','C'],
-	['C','3','M','M','3','3','4','C','C'],
-	['C','4','4','3','2','U','1','2','2'],
-	['C','C','4','M','2','U','1','1','1'],
-	['3','C','4','M','4','3','3','C','1'],
-	['1','1','2','2','M','M','M','2','1'],
-	['2','2','1','2','5','M','5','2','1'],
-	['C','C','4','4','C','M','6','M','3'],
-	['C','C','C','C','C','M','M','M','M'],
-]
-
-trial = [
-	['1','2','1','2','2','M','2','C','C'],
-	['M','3','M','2','M','3','3','C','C'],
-	['M','4','1','2','1','3','M','C','C'],
-	['M','3','U','U','U','3','M','4','1'],
-	['M','3','1','U','U','2','M','4','M'],
-	['4','M','3','2','3','4','3','5','M'],
-	['M','M','3','M','M','M','M','6','M'],
-	['M','6','5','4','6','M','M','M','M'],
-	['M','M','M','M','3','M','C','C','C'],
-]
-
-board = Board(trial, 35)
-board.show_board()
+board = Board(9, 9, 35)
 board.process_board()
 
 # TODO: fix remaining calc?
