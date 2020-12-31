@@ -2,7 +2,8 @@ import numpy as np
 import itertools
 from datetime import datetime
 
-from ui import Screen
+# from ui import Screen
+from video import Screen
 
 start = datetime.now()
 
@@ -32,12 +33,26 @@ class Board:
 		Initiates board of size rows by columns, with mines
 		"""
 		self.screen = Screen(rows, columns)
-		self.board = self.screen.capture()
+		self.board = None
 		self.rows = rows
 		self.columns = columns
 		self.mines = mines
-		self.remaining_tiles = sum(sum( self.board == 'C' ))
-		self.remaining_mines = self.mines - sum([ sum(r == 'M') for r in self.board ])
+		self.remaining_tiles = rows * columns
+		self.remaining_mines = mines
+		# self.remaining_tiles = sum(sum( self.board == 'C' ))
+		# self.remaining_mines = self.mines - sum([ sum(r == 'M') for r in self.board ])
+		self.capture()
+
+	def capture(self):
+		while True:
+			capturing = self.screen.capture()
+			if not capturing:
+				break
+			
+			if self.screen.processing:
+				self.screen.process()
+				self.board = self.screen.board
+				self.process_board()
 
 	def _coordinates(self):
 		"""
@@ -74,17 +89,15 @@ class Board:
 		"""
 		Calculates the next best move.
 		"""
-		if not self.create_vectors():
-			self.probabilities()
-		self.screen.print_board(self.remaining_tiles, self.remaining_mines)
-		self.board = self.screen.capture()
 		self.remaining_tiles = sum(sum( self.board == 'C' ))
-		# print('Remaining Tiles:', self.remaining_tiles)
+		self.remaining_mines = self.mines - sum([ sum(r == 'M') for r in self.board ])
 		if (self.remaining_tiles == 0):
 			print('Game Complete!')
 			return False
-		self.remaining_mines = self.mines - sum([ sum(r == 'M') for r in self.board ])
-		self.process_board()
+		if not self.create_vectors():
+			self.probabilities()
+		self.screen.print_board(self.remaining_tiles, self.remaining_mines)
+		# self.board = self.screen.board
 
 	
 	def _non_numerical_types(self):
@@ -94,7 +107,7 @@ class Board:
 		numbered_locations = np.transpose(np.isin(self.board, self._non_numerical_types(), invert=True).nonzero())
 		vectors = {}
 		for location in numbered_locations:
-			root = ''.join([ str(i) for i in location])
+			root = ','.join([ str(i) for i in location])
 			
 			mines = int(self.board[tuple(location)])
 			neighbor_coordinates = self._get_neighbor_coordinates(*location)
@@ -115,20 +128,14 @@ class Board:
 			if len(neighbor_coordinates) == 0:
 				continue
 			
-			vector = ''.join([ str(c) for s in neighbor_coordinates for c in s  ])
+			vector = '|'.join([ ','.join([str(c) for c in s]) for s in neighbor_coordinates  ])
 			vectors[root] = {
 				'vector': vector,
 			 	'mines': mines
 			}
 
-			# if (mines == len(neighbor_coordinates)):
-			# 	# print('100% Mines Found', root, vectors[root])
-			# 	for v in self.split_vector(vectors[root]['vector']):
-			# 		cor = self.screen.get_tile_coordinate(*tuple(v))
-			# 		self.screen.right_click(*cor)
-
-			# 	return True
 		self.vectors = vectors
+		print('Vectors', vectors)
 		targets = []
 		mines = []
 		for k,v in self.vectors.items():
@@ -150,23 +157,24 @@ class Board:
 				self.screen.right_click(*cor)
 
 		if len(targets) > 0 or len(mines) > 0:
+			print('Should skip probs...')
 			return True
 		return False
 
 	def split_vector(self, vector):
-		x = []
-		y = []
-		for ix, c in enumerate(vector):
-			if ix % 2:
-				x.append(int(c))
-			else:
-				y.append(int(c))
-		s = list(zip(y,x))
-		return s
+		"""
+		:param vector: string in the form 'y1,x1|y2,x2'
+		:return: list of tuples in the form [(y1,x1),(y2,x2)]
+		"""
+		return [ tuple([ int(i) for i in c.split(',')]) for c in vector.split('|') ]
 
-	def unique_vector_coordinates(self):
+	def unique_vector_coordinates(self, vectors=self.vectors):
+		"""
+		:param vectors: list of vectors in the form:
+			[ {'root': { 'vector': 'y1,x1|y2,x2', ''  }}]
+		"""
 		coordinates = []
-		for v in self.vectors.values():
+		for v in vectors.values():
 			coordinates = coordinates + self.split_vector(v['vector'])
 		return set(coordinates)
 
@@ -207,7 +215,7 @@ class Board:
 			coords = self.split_vector(v['vector'])
 			vector_sum = 0
 			for coord in coords:
-				vector_sum += state["".join([ str(c) for c in coord])]
+				vector_sum += state[*coord]
 			if v['mines'] != vector_sum:
 				return False
 		return True
@@ -237,6 +245,11 @@ class Board:
 		for state in states:
 			mines += sum(state.values())
 		return mines / len(states)
+
+	def aggregate_states(self, states):
+		"""
+		:states: list of states in the form 
+		"""
 
 	def probabilities(self):
 		states = self.valid_states()
@@ -298,6 +311,6 @@ class Board:
 
 
 board = Board(9, 9, 35)
-board.process_board()
+# board = Board(16, 30, 170)
 
 # TODO: fix remaining calc?
