@@ -65,7 +65,7 @@ class Screen:
 				row_tiles.append(tile)
 			self.board.append(row_tiles)
 		self.board = np.array(self.board)
-		self.print_board(20,20)
+		# self.print_board(20,20)
 
 	def get_tile_coordinate(self, row, column):
 		cell_width = int(self.width / self.columns)
@@ -77,7 +77,7 @@ class Screen:
 
 	def click_to_activate(self):
 		buf = 50
-		pyautogui.click(x=self.width+buf, y=self.top-buf)
+		pyautogui.click(x=self.left+self.width+buf, y=self.top-buf)
 
 	def left_click(self, left, top):
 		if self.debug:
@@ -95,7 +95,7 @@ class Screen:
 			self.click_to_activate()
 			pyautogui.click(button='right', x=left, y=top)
 
-	def print_board(self, tiles, mines, board=None):
+	def print_board(self, tiles, mines, board=[]):
 		"""
 		Prints a representation of the Minesweeper board.
 		"""

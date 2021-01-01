@@ -1,9 +1,10 @@
-import numpy as np
 import itertools
+import numpy as np
 from datetime import datetime
 
 from video import Screen
 from utils import unique_vector_coordinates, non_vector_coordinates
+from utils import sum_value_from_tuple_ndarray, coordinates, neighbor_coordinates
 from utils_board import example_board
 
 start = datetime.now()
@@ -57,31 +58,9 @@ class Board:
 			if self.screen.processing:
 				self.screen.process()
 				self.board = self.screen.board
-				self.process_board()
-
-	def _coordinates(self):
-		"""
-		Generates all possible coordinate positions.
-		"""
-		return list(itertools.product(range(0, self.rows, 1), range(0, self.columns, 1)))
-
-	
-	def _get_neighbor_coordinates(self, row, column):
-		"""
-		Return all neighbor coordinates.
-		"""
-		rows, columns = self.board.shape
-		neighbors = []
-		for row2 in range(row-1, row+2):
-			for column2 in range(column-1, column+2):
-				# make sure provided coordinates are within the grid
-				if (-1 < row < rows and -1 < column < columns):
-					# make sure we stay within the boundaries of the grid
-					if (0 <= row2 < rows) and (0 <= column2 < columns):
-						# don't use self as a neighbor
-						if (row != row2 or column != column2):
-							neighbors.append((row2, column2))
-		return neighbors
+				self.print_board()
+				if not self.process_board():
+					break
 
 	def _get_neighbor_values(self, board, neighbors):
 		"""
@@ -89,6 +68,14 @@ class Board:
 		"""
 		return np.array([board[(coordinate)] for coordinate in neighbors])
 
+	def print_board(self):
+		"""
+		Prints a representation of the board.
+		"""
+		if self.debug:
+			self.screen.print_board(self.remaining_tiles, self.remaining_mines, self.board)	
+		else:
+			self.screen.print_board(self.remaining_tiles, self.remaining_mines)
 
 	def process_board(self):
 		"""
@@ -97,14 +84,13 @@ class Board:
 		self.remaining_tiles = sum(sum( self.board == 'C' ))
 		self.remaining_mines = self.mines - sum([ sum(r == 'M') for r in self.board ])
 		if (self.remaining_tiles == 0):
+			# self.print_board()
 			print('Game Complete!')
 			return False
 		if not self.create_vectors():
 			self.probabilities()
-		if self.debug:
-			self.screen.print_board(self.remaining_tiles, self.remaining_mines, self.board)	
-		else:
-			self.screen.print_board(self.remaining_tiles, self.remaining_mines)
+		# self.print_board()
+		return True
 
 	
 	def _non_numerical_types(self):
@@ -116,61 +102,67 @@ class Board:
 		for location in numbered_locations:
 			
 			mines = int(self.board[tuple(location)])
-			neighbor_coordinates = self._get_neighbor_coordinates(*location)
-			neighbor_values = self._get_neighbor_values(self.board, neighbor_coordinates)
+			nc = neighbor_coordinates(*location, self.board)
+			neighbor_values = self._get_neighbor_values(self.board, nc)
 			
 			valid_neighbors = []
 			valid_neighbor_values = []
-			for ix, coord in enumerate(neighbor_coordinates):
+			for ix, coord in enumerate(nc):
 				if neighbor_values[ix] == 'M':
 					mines = mines - 1
 				elif neighbor_values[ix] == 'C':
 					valid_neighbors.append(coord)
 					valid_neighbor_values.append(neighbor_values[ix])
 			
-			neighbor_coordinates = valid_neighbors
+			nc = valid_neighbors
 			neighbor_values = np.array(valid_neighbor_values)
 
-			if len(neighbor_coordinates) == 0:
+			if len(nc) == 0:
 				continue
 			
-			print(neighbor_coordinates)
 			vectors.append({
 				'root': location,
-				'vector': neighbor_coordinates,
+				'vector': nc,
 			 	'mines': mines
 			})
 
 		self.vectors = vectors
-		print('Vectors', vectors)
 		targets = []
 		mines = []
 		for vector in vectors:
+			# if the remaining mines in the vector is 0, all tiles are safe
+			# if the remaining mines in the vector equals the remaining tiles,
+			# all tiles are mines
 			if vector['mines'] == 0:
 				targets = targets + vector['vector']
-			if vector['mines'] == len(vector['vector']) / 2:
+			if vector['mines'] == len(vector['vector']):
 				mines = mines + vector['vector']
 
 		targets = set(targets)
 		mines = set(mines)
+
+		# click on any safe tiles
 		if len(targets) > 0:
 			for target in targets:
 				cor = self.screen.get_tile_coordinate(*target)
 				self.screen.left_click(*cor)
+		
+		# mark any mine tiles
 		if len(mines) > 0:
 			for mine in mines:
 				cor = self.screen.get_tile_coordinate(*mine)
 				self.screen.right_click(*cor)
 
+		# if we clicked or marked any tiles, skip the final probability step
 		if len(targets) > 0 or len(mines) > 0:
-			print('Should skip probs...')
 			return True
+
+		# if no safe or mine tiles discovered, continue to the final probability step
 		return False
 
 	def possible_states(self):
 		print('Generating Possible States...')
 		uvc = unique_vector_coordinates(self.vectors)
-		print(uvc)
 		scenarios = np.array(list(itertools.product([0,1], repeat=len(uvc))))
 		states = []
 		blacklist = np.transpose((self.board == 'M').nonzero())
@@ -187,7 +179,7 @@ class Board:
 
 			if not skipping:
 				states.append(scenario)
-		return np.array(states)
+		return np.array(states, dtype=object)
 
 	def is_valid_state(self, scenario):
 
@@ -207,6 +199,12 @@ class Board:
 			if vector['mines'] != vector_mines:
 				return False
 
+		# invalid scenario if the (remaining tiles - tiles in scenario) is less than
+		# the (remaining mines - mines in scenario)
+		scenario_tiles = len(scenario)
+		if ((self.remaining_tiles - scenario_tiles) < (self.remaining_mines - scenario_mines)):
+			return False
+
 		# scenario has passed all checks
 		return True
 
@@ -217,14 +215,12 @@ class Board:
 		for state in states:
 			if self.is_valid_state(state):
 				valid_states.append(state)
-		for s in valid_states:
-			print(s)
 		return valid_states
 
 	def average_number_of_mines(self, states):
 		mines = 0
 		for state in states:
-			mines += sum(state.values())
+			mines += sum_value_from_tuple_ndarray(state)
 		return mines / len(states)
 
 	def aggregate_states(self, states):
@@ -238,35 +234,42 @@ class Board:
 
 		# sum up the number of times a mine occurs on a given cell
 		# in all scenarios
-		vector_cells = {}
+		vc = {}
 		for state in states:
 			for cell in state:
-				coordinates, mines = cell
-				vector_cells[coordinates] = vector_cells.get(coordinates, 0) + mines
+				coord, mines = cell
+				vc[coord] = vc.get(coord, 0) + mines
 
-		print(vector_cells)
+		for state in states:
+			print(state)
+
 		# how many mines in above, on average?
 		avg_mines = self.average_number_of_mines(states)
-		print(avg_mines)
 		other_mines = self.remaining_mines - avg_mines
-		print(other_mines)
-		for k in vector_cells.keys():
-			vector_cells[k] = vector_cells[k] / len(states)
-		print('\nVector Cells:')
-		for k in sorted(vector_cells.keys()):
-			print(f"{k}: {vector_cells[k]}")
+
+		print('Avg', avg_mines, 'Other', other_mines)
+		for k in vc.keys():
+			vc[k] = vc[k] / len(states)
+		# print('\nVector Cells:')
+		# for k in sorted(vc.keys()):
+		# 	print(f"{k}: {vc[k]}")
 		
-		nvc = self.get_non_vector_cells(vector_cells)
-		for k in nvc.keys():
-			vector_cells[k] = round(other_mines / len(nvc), 4)
+		bc = coordinates(self.rows, self.columns)
+		b = self.board
+		nvc = non_vector_coordinates(vc, bc, b)
+		for k in nvc:
+			vc[k] = round(other_mines / len(nvc), 4)
 		print('\nAll Cells:')
-		for k in sorted(vector_cells.keys()):
-			print(f"{k}: {vector_cells[k]}")
-		probabilities = vector_cells
+		for k in sorted(vc.keys()):
+			print(f"{k}: {vc[k]}")
+
+		probabilities = vc
 		clean = []
 		mines = []
+
+		# if probability is 0, add to list of tiles to click
+		# if probability is 1, add to list of tiles to mark as mine
 		for k,v in probabilities.items():
-			k = tuple([int(c) for c in str(k)])
 			k = self.screen.get_tile_coordinate(*k)
 			if v == 0:
 				clean.append(k)
@@ -286,7 +289,8 @@ class Board:
 			options = [ { k: v } for k,v in probabilities.items() if v == lowest_probability]
 			rng = np.random.default_rng()
 			choice = rng.choice(options)
-			cor = tuple([ int(char) for char in choice[0] ])
+			print("Best Tile:", choice)
+			cor = list(choice.keys())[0]
 			cor = self.screen.get_tile_coordinate(*cor)
 			self.screen.left_click(*cor)
 			return True
@@ -297,7 +301,7 @@ class Board:
 # https://www.chiark.greenend.org.uk/~sgtatham/puzzles/js/mines.html#9x9n35#952602088781240
 # examine: https://www.chiark.greenend.org.uk/~sgtatham/puzzles/js/mines.html#9x9n35#111486851880096
 
-board = Board(9,9,35,debug=True)
+board = Board(16,16,99,debug=False)
 # board = Board(9, 9, 35)
 # board = Board(16, 30, 170)
 

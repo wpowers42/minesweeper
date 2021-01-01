@@ -8,10 +8,6 @@ from utils import *
 class UtilsTest(unittest.TestCase):
 
 	def setUp(self):
-		# self.rows = 9
-		# self.columns = 9
-		# self.mines = 35
-		# self.board = Board(self.rows, self.columns, self.mines)
 		pass
 
 	def tearDown(self):
@@ -43,6 +39,36 @@ class UtilsTest(unittest.TestCase):
 		vc.add((1,1))
 		nvc = non_vector_coordinates(vc, bc, b)
 		self.assertEqual(nvc, set({}))
+
+	def test_sum_value_from_tuple_ndarray(self):
+		tn = [[(1, 2), 0],
+			  [(0, 0), 1],
+			  [(1, 1), 0],
+			  [(0, 2), 0],
+			  [(1, 0), 0]]
+		self.assertEqual(sum_value_from_tuple_ndarray(tn), 1)
+
+	def test_coordinates(self):
+		rows = 3
+		columns = 4
+		expected_result = set([(0, 0),(0, 1),(0, 2),(0, 3),
+						   	   (1, 0),(1, 1),(1, 2),(1, 3),
+						   	   (2, 0),(2, 1),(2, 2),(2, 3)])
+
+		self.assertEqual(coordinates(rows, columns), expected_result )
+
+
+	def test_neighbor_coordinates(self):
+		row = 1
+		column = 1
+		board = np.array([['C','C','C','C'],
+						  ['C','C','C','C'],
+						  ['C','C','C','C'],
+						  ['C','C','C','C']])
+		expected_result = set([(0,0),(0,1),(0,2),
+							   (1,0),(1,2),(2,0),
+							   (2,1),(2,2)])
+		self.assertEqual(neighbor_coordinates(row, column, board), expected_result)
 
 if __name__ == '__main__':
 	unittest.main(verbosity=2)
