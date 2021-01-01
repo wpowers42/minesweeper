@@ -2,8 +2,9 @@ import numpy as np
 import itertools
 from datetime import datetime
 
-# from ui import Screen
 from video import Screen
+from utils import unique_vector_coordinates, non_vector_coordinates
+from utils_board import example_board
 
 start = datetime.now()
 
@@ -28,20 +29,24 @@ class Board:
 	"""
 	A representation of a Minesweeper board.
 	"""
-	def __init__(self, rows, columns, mines):
+	def __init__(self, rows, columns, mines, debug=False):
 		"""
 		Initiates board of size rows by columns, with mines
 		"""
-		self.screen = Screen(rows, columns)
-		self.board = None
+		self.debug = debug
 		self.rows = rows
 		self.columns = columns
 		self.mines = mines
 		self.remaining_tiles = rows * columns
 		self.remaining_mines = mines
-		# self.remaining_tiles = sum(sum( self.board == 'C' ))
-		# self.remaining_mines = self.mines - sum([ sum(r == 'M') for r in self.board ])
-		self.capture()
+		self.screen = Screen(rows, columns, debug)
+		
+		if debug:
+			self.board = np.array(example_board)
+			self.process_board()
+		else:
+			self.board = None
+			self.capture()
 
 	def capture(self):
 		while True:
@@ -96,8 +101,10 @@ class Board:
 			return False
 		if not self.create_vectors():
 			self.probabilities()
-		self.screen.print_board(self.remaining_tiles, self.remaining_mines)
-		# self.board = self.screen.board
+		if self.debug:
+			self.screen.print_board(self.remaining_tiles, self.remaining_mines, self.board)	
+		else:
+			self.screen.print_board(self.remaining_tiles, self.remaining_mines)
 
 	
 	def _non_numerical_types(self):
@@ -105,9 +112,8 @@ class Board:
 
 	def create_vectors(self):
 		numbered_locations = np.transpose(np.isin(self.board, self._non_numerical_types(), invert=True).nonzero())
-		vectors = {}
+		vectors = []
 		for location in numbered_locations:
-			root = ','.join([ str(i) for i in location])
 			
 			mines = int(self.board[tuple(location)])
 			neighbor_coordinates = self._get_neighbor_coordinates(*location)
@@ -128,22 +134,22 @@ class Board:
 			if len(neighbor_coordinates) == 0:
 				continue
 			
-			vector = '|'.join([ ','.join([str(c) for c in s]) for s in neighbor_coordinates  ])
-			vectors[root] = {
-				'vector': vector,
+			print(neighbor_coordinates)
+			vectors.append({
+				'root': location,
+				'vector': neighbor_coordinates,
 			 	'mines': mines
-			}
+			})
 
 		self.vectors = vectors
 		print('Vectors', vectors)
 		targets = []
 		mines = []
-		for k,v in self.vectors.items():
-			if v['mines'] == 0:
-				targets = targets + self.split_vector(v['vector'])
-			if v['mines'] == len(v['vector']) / 2:
-				print(v['vector'], v['mines'])
-				mines = mines + self.split_vector(v['vector'])
+		for vector in vectors:
+			if vector['mines'] == 0:
+				targets = targets + vector['vector']
+			if vector['mines'] == len(vector['vector']) / 2:
+				mines = mines + vector['vector']
 
 		targets = set(targets)
 		mines = set(mines)
@@ -161,63 +167,47 @@ class Board:
 			return True
 		return False
 
-	def split_vector(self, vector):
-		"""
-		:param vector: string in the form 'y1,x1|y2,x2'
-		:return: list of tuples in the form [(y1,x1),(y2,x2)]
-		"""
-		return [ tuple([ int(i) for i in c.split(',')]) for c in vector.split('|') ]
-
-	def unique_vector_coordinates(self, vectors=self.vectors):
-		"""
-		:param vectors: list of vectors in the form:
-			[ {'root': { 'vector': 'y1,x1|y2,x2', ''  }}]
-		"""
-		coordinates = []
-		for v in vectors.values():
-			coordinates = coordinates + self.split_vector(v['vector'])
-		return set(coordinates)
-
 	def possible_states(self):
 		print('Generating Possible States...')
-		cells = self.unique_vector_coordinates()
-		str_cells = []
-		for cell in cells:
-			c = ''
-			for coord in cell:
-				c += str(coord)
-			str_cells.append(c)
-		cells = str_cells
-		scenarios = np.array(list(itertools.product([0,1], repeat=len(cells))))
+		uvc = unique_vector_coordinates(self.vectors)
+		print(uvc)
+		scenarios = np.array(list(itertools.product([0,1], repeat=len(uvc))))
 		states = []
 		blacklist = np.transpose((self.board == 'M').nonzero())
-		blacklist = [ ''.join([str(c) for c in b]) for b in blacklist ]
-		blacklist = set(blacklist)
+		blacklist = set([ tuple(b) for b in blacklist ])
 		for s in scenarios:
-			temp = list(zip(cells,s))
-			temp_dict = {}
-			passing = False
-			for t in temp:
-				temp_dict[t[0]] = int(t[1])
-				if t[0] in blacklist and int(t[1]) == 0:
-					passing = True
+			# we want to skip any scenarios that don't assume a mine
+			# on a tile that already has a mine
+			scenario = list(zip(uvc,s))
+			skipping = False
+			for tile in scenario:
+				if (tile[0] in blacklist) & (tile[1] == 0):
+					skipping = True
 					continue
-			if not passing:
-				states.append(temp_dict)
+
+			if not skipping:
+				states.append(scenario)
 		return np.array(states)
 
-	def is_valid_state(self, state):
-		if sum(state.values()) > self.remaining_mines:
+	def is_valid_state(self, scenario):
+
+		scenario_mines = sum([ s[1] for s in scenario ])
+		if scenario_mines > self.remaining_mines:
 			return False
-		if self.remaining_tiles == len(state) and self.remaining_mines != sum(state.values()):
+		# invalid scenario if all remaining tiles must be mines, but the scenario
+		# doesn't place all mines
+		if (self.remaining_tiles == self.remaining_mines != scenario_mines):
 			return False
-		for k,v in self.vectors.items():
-			coords = self.split_vector(v['vector'])
-			vector_sum = 0
-			for coord in coords:
-				vector_sum += state[*coord]
-			if v['mines'] != vector_sum:
+
+		# invalid scenario if we don't satify a given vectors condition (e.g. number
+		# of mines place)
+		for vector in self.vectors:
+			coords = vector['vector']
+			vector_mines = sum([ s[1] for s in scenario if s[0] in coords ])
+			if vector['mines'] != vector_mines:
 				return False
+
+		# scenario has passed all checks
 		return True
 
 	
@@ -231,15 +221,6 @@ class Board:
 			print(s)
 		return valid_states
 
-	def get_non_vector_cells(self, cells):
-		coords = self._coordinates()
-		non_vector_cells = {}
-		for coord in coords:
-			c = ''.join(str(c) for c in coord)
-			if c not in cells.keys() and self.board[(coord)] == 'C':
-				non_vector_cells[c] = 0
-		return non_vector_cells
-
 	def average_number_of_mines(self, states):
 		mines = 0
 		for state in states:
@@ -250,31 +231,38 @@ class Board:
 		"""
 		:states: list of states in the form 
 		"""
+		pass
 
 	def probabilities(self):
 		states = self.valid_states()
-		cells = {}
+
+		# sum up the number of times a mine occurs on a given cell
+		# in all scenarios
+		vector_cells = {}
 		for state in states:
-			for k,v in state.items():
-				cells[k] = cells.get(k, 0) + v
+			for cell in state:
+				coordinates, mines = cell
+				vector_cells[coordinates] = vector_cells.get(coordinates, 0) + mines
+
+		print(vector_cells)
 		# how many mines in above, on average?
 		avg_mines = self.average_number_of_mines(states)
 		print(avg_mines)
 		other_mines = self.remaining_mines - avg_mines
 		print(other_mines)
-		for k in cells.keys():
-			cells[k] = cells[k] / len(states)
+		for k in vector_cells.keys():
+			vector_cells[k] = vector_cells[k] / len(states)
 		print('\nVector Cells:')
-		for k in sorted(cells.keys()):
-			print(f"{k}: {cells[k]}")
+		for k in sorted(vector_cells.keys()):
+			print(f"{k}: {vector_cells[k]}")
 		
-		nvc = self.get_non_vector_cells(cells)
+		nvc = self.get_non_vector_cells(vector_cells)
 		for k in nvc.keys():
-			cells[k] = round(other_mines / len(nvc), 4)
+			vector_cells[k] = round(other_mines / len(nvc), 4)
 		print('\nAll Cells:')
-		for k in sorted(cells.keys()):
-			print(f"{k}: {cells[k]}")
-		probabilities = cells
+		for k in sorted(vector_cells.keys()):
+			print(f"{k}: {vector_cells[k]}")
+		probabilities = vector_cells
 		clean = []
 		mines = []
 		for k,v in probabilities.items():
@@ -309,8 +297,8 @@ class Board:
 # https://www.chiark.greenend.org.uk/~sgtatham/puzzles/js/mines.html#9x9n35#952602088781240
 # examine: https://www.chiark.greenend.org.uk/~sgtatham/puzzles/js/mines.html#9x9n35#111486851880096
 
-
-board = Board(9, 9, 35)
+board = Board(9,9,35,debug=True)
+# board = Board(9, 9, 35)
 # board = Board(16, 30, 170)
 
 # TODO: fix remaining calc?

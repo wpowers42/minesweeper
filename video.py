@@ -13,7 +13,8 @@ import os
 pyautogui.FAILSAFE = True
 
 class Screen:
-	def __init__(self, rows, columns):
+	def __init__(self, rows, columns, debug):
+		self.debug = debug
 		self.rows = rows
 		self.columns = columns
 		self.top = 600
@@ -79,38 +80,35 @@ class Screen:
 		pyautogui.click(x=self.width+buf, y=self.top-buf)
 
 	def left_click(self, left, top):
-		self.click_to_activate()
-		pyautogui.click(x=left, y=top)
+		if self.debug:
+			print('Simulated click at', (left, top))
+			pass
+		else:
+			self.click_to_activate()
+			pyautogui.click(x=left, y=top)
 
 	def right_click(self, left, top):
-		self.click_to_activate()
-		pyautogui.click(button='right', x=left, y=top)
+		if self.debug:
+			print('Simulated click at', (left, top))
+			pass
+		else:
+			self.click_to_activate()
+			pyautogui.click(button='right', x=left, y=top)
 
-	def print_board(self, tiles, mines):
+	def print_board(self, tiles, mines, board=None):
 		"""
 		Prints a representation of the Minesweeper board.
 		"""
 		os.system('clear')
 		print('\nBoard:')
-		for row in self.board:
+		if len(board) == 0:
+			board = self.board
+
+		for row in board:
 			print(' '.join(row))
 		print(f'Remaining Tiles:{tiles}, Remaining Mines: {mines}')
 
 	def classify_cell(self, cell):
-
-		# rgb
-		# colors = {
-		# 	'C': '[229 229 229]',
-		# 	'U': '[218 218 218]',
-		# 	'1': '[  0   0 255]',
-		# 	'2': '[  0 128   0]',
-		# 	'3': '[255   0   0]',
-		# 	'4': '[  0   0 128]',
-		# 	'5': '[128   0   0]',
-		# 	'6': '[  0 128 128]',
-		# 	'7': '[0 0 0]',
-		# 	'8': '[XXX XXX XXX]',
-		# }
 
 		# bgr
 		colors = {
