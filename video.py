@@ -67,7 +67,8 @@ class Screen:
 		self.board = np.array(self.board)
 		# self.print_board(20,20)
 
-	def get_tile_coordinate(self, row, column):
+	def get_tile_coordinate(self, rc):
+		row, column = rc
 		cell_width = int(self.width / self.columns)
 		left = int(column * cell_width + cell_width / 2) + self.left
 		top = int(row * cell_width + cell_width / 2) + self.top

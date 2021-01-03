@@ -1,13 +1,16 @@
+import time
 import itertools
 import numpy as np
-from datetime import datetime
+import multiprocessing as mp
+from functools import partial
 
 from video import Screen
 from utils import unique_vector_coordinates, non_vector_coordinates
 from utils import sum_value_from_tuple_ndarray, coordinates, neighbor_coordinates
+from utils import is_valid_state, check_scenario
 from utils_board import example_board
 
-start = datetime.now()
+from logic import Solver
 
 TYPES = {
 	'U'	: 'U',
@@ -83,8 +86,9 @@ class Board:
 		"""
 		self.remaining_tiles = sum(sum( self.board == 'C' ))
 		self.remaining_mines = self.mines - sum([ sum(r == 'M') for r in self.board ])
-		if (self.remaining_tiles == 0):
+		if (self.remaining_mines == 0):
 			# self.print_board()
+			self.click_remaining_tiles()
 			print('Game Complete!')
 			return False
 		if not self.create_vectors():
@@ -92,6 +96,14 @@ class Board:
 		# self.print_board()
 		return True
 
+	def click_remaining_tiles(self):
+		"""
+		This is triggered when no mines are left on the board, so it's safe to click the
+		remaining tiles.
+		"""
+		safe = np.transpose((self.board == 'C').nonzero())
+		safe = [ self.screen.get_tile_coordinate(c) for c in safe ]
+		list(itertools.starmap(self.screen.left_click, safe))
 	
 	def _non_numerical_types(self):
 		return np.array([TYPES['U'],TYPES['M'],TYPES['C']])
@@ -120,6 +132,9 @@ class Board:
 			if len(nc) == 0:
 				continue
 			
+			if tuple(location) == (4,17):
+				print (location, nc, mines)
+
 			vectors.append({
 				'root': location,
 				'vector': nc,
@@ -144,78 +159,22 @@ class Board:
 		# click on any safe tiles
 		if len(targets) > 0:
 			for target in targets:
-				cor = self.screen.get_tile_coordinate(*target)
+				cor = self.screen.get_tile_coordinate(target)
 				self.screen.left_click(*cor)
 		
 		# mark any mine tiles
 		if len(mines) > 0:
 			for mine in mines:
-				cor = self.screen.get_tile_coordinate(*mine)
+				cor = self.screen.get_tile_coordinate(mine)
 				self.screen.right_click(*cor)
 
 		# if we clicked or marked any tiles, skip the final probability step
 		if len(targets) > 0 or len(mines) > 0:
 			return True
-
+		
 		# if no safe or mine tiles discovered, continue to the final probability step
-		return False
+		return self.probabilities()
 
-	def possible_states(self):
-		print('Generating Possible States...')
-		uvc = unique_vector_coordinates(self.vectors)
-		scenarios = np.array(list(itertools.product([0,1], repeat=len(uvc))))
-		states = []
-		blacklist = np.transpose((self.board == 'M').nonzero())
-		blacklist = set([ tuple(b) for b in blacklist ])
-		for s in scenarios:
-			# we want to skip any scenarios that don't assume a mine
-			# on a tile that already has a mine
-			scenario = list(zip(uvc,s))
-			skipping = False
-			for tile in scenario:
-				if (tile[0] in blacklist) & (tile[1] == 0):
-					skipping = True
-					continue
-
-			if not skipping:
-				states.append(scenario)
-		return np.array(states, dtype=object)
-
-	def is_valid_state(self, scenario):
-
-		scenario_mines = sum([ s[1] for s in scenario ])
-		if scenario_mines > self.remaining_mines:
-			return False
-		# invalid scenario if all remaining tiles must be mines, but the scenario
-		# doesn't place all mines
-		if (self.remaining_tiles == self.remaining_mines != scenario_mines):
-			return False
-
-		# invalid scenario if we don't satify a given vectors condition (e.g. number
-		# of mines place)
-		for vector in self.vectors:
-			coords = vector['vector']
-			vector_mines = sum([ s[1] for s in scenario if s[0] in coords ])
-			if vector['mines'] != vector_mines:
-				return False
-
-		# invalid scenario if the (remaining tiles - tiles in scenario) is less than
-		# the (remaining mines - mines in scenario)
-		scenario_tiles = len(scenario)
-		if ((self.remaining_tiles - scenario_tiles) < (self.remaining_mines - scenario_mines)):
-			return False
-
-		# scenario has passed all checks
-		return True
-
-	
-	def valid_states(self):
-		states = self.possible_states()
-		valid_states = []
-		for state in states:
-			if self.is_valid_state(state):
-				valid_states.append(state)
-		return valid_states
 
 	def average_number_of_mines(self, states):
 		mines = 0
@@ -223,86 +182,48 @@ class Board:
 			mines += sum_value_from_tuple_ndarray(state)
 		return mines / len(states)
 
-	def aggregate_states(self, states):
-		"""
-		:states: list of states in the form 
-		"""
-		pass
-
 	def probabilities(self):
-		states = self.valid_states()
+		solution = self.solve()
 
-		# sum up the number of times a mine occurs on a given cell
-		# in all scenarios
-		vc = {}
-		for state in states:
-			for cell in state:
-				coord, mines = cell
-				vc[coord] = vc.get(coord, 0) + mines
+		list(itertools.starmap(self.screen.left_click, solution['safe']))
+		list(itertools.starmap(self.screen.right_click, solution['mines']))
 
-		for state in states:
-			print(state)
-
-		# how many mines in above, on average?
-		avg_mines = self.average_number_of_mines(states)
-		other_mines = self.remaining_mines - avg_mines
-
-		print('Avg', avg_mines, 'Other', other_mines)
-		for k in vc.keys():
-			vc[k] = vc[k] / len(states)
-		# print('\nVector Cells:')
-		# for k in sorted(vc.keys()):
-		# 	print(f"{k}: {vc[k]}")
-		
-		bc = coordinates(self.rows, self.columns)
-		b = self.board
-		nvc = non_vector_coordinates(vc, bc, b)
-		for k in nvc:
-			vc[k] = round(other_mines / len(nvc), 4)
-		print('\nAll Cells:')
-		for k in sorted(vc.keys()):
-			print(f"{k}: {vc[k]}")
-
-		probabilities = vc
-		clean = []
-		mines = []
-
-		# if probability is 0, add to list of tiles to click
-		# if probability is 1, add to list of tiles to mark as mine
-		for k,v in probabilities.items():
-			k = self.screen.get_tile_coordinate(*k)
-			if v == 0:
-				clean.append(k)
-			if v == 1:
-				mines.append(k)
-
-		if len(clean):
-			for c in clean:
-				self.screen.left_click(*c)
-		if len(mines):
-			for m in mines:
-				self.screen.right_click(*m)
-		if len(clean) or len(mines):
+		if (len(solution['safe']) > 0) or (len(solution['mines']) > 0):
+			return True
+		elif (len(solution['alternative']) > 0):
+			print('Taking an educated guess!')
+			self.screen.left_click(*solution['alternative'])
 			return True
 		else:
-			lowest_probability = min(probabilities.values())
-			options = [ { k: v } for k,v in probabilities.items() if v == lowest_probability]
-			rng = np.random.default_rng()
-			choice = rng.choice(options)
-			print("Best Tile:", choice)
-			cor = list(choice.keys())[0]
-			cor = self.screen.get_tile_coordinate(*cor)
-			self.screen.left_click(*cor)
-			return True
+			print('Unable to find match.')
+			return False
 
 
+	def solve(self):
+		solver = Solver(self.vectors)
+		solution = solver.solutions()
+		print(solution)
+		safe = [ self.screen.get_tile_coordinate(k) for k,v in solution.items() if v == 0.0 ]
+		mines = [ self.screen.get_tile_coordinate(k) for k,v in solution.items() if v == 1.0 ]
+
+		# get they keys of the items with the lowest values and select a random one
+		rng = np.random.default_rng()
+		minval = min(solution.values()) if len(solution.values()) > 0 else 0
+		if minval != 0:
+			alternative = self.screen.get_tile_coordinate(rng.choice(list(filter(lambda x: solution[x]==minval, solution))))
+		else:
+			alternative = ()
+
+		result = {
+			'safe': safe,
+			'mines': mines,
+			'alternative': alternative
+		}
+
+		return result
 
 
 # https://www.chiark.greenend.org.uk/~sgtatham/puzzles/js/mines.html#9x9n35#952602088781240
 # examine: https://www.chiark.greenend.org.uk/~sgtatham/puzzles/js/mines.html#9x9n35#111486851880096
-
-board = Board(16,16,99,debug=False)
-# board = Board(9, 9, 35)
-# board = Board(16, 30, 170)
-
-# TODO: fix remaining calc?
+if __name__ == "__main__":
+	board = Board(16,30,170,debug=False)

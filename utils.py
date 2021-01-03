@@ -1,4 +1,5 @@
 import itertools
+import numpy as np
 
 """
 COORDINATES
@@ -17,7 +18,7 @@ def unique_vector_coordinates(vectors):
 	all_vectors = []
 	for v in vectors:
 		all_vectors = all_vectors + v['vector']
-	return set(all_vectors)
+	return sorted(list(set(all_vectors)))
 
 
 def non_vector_coordinates(vector_coordinates, board_coordinates, board):
@@ -75,3 +76,63 @@ def sum_value_from_tuple_ndarray(tuple_ndarray):
 	:return: integer in the form 1
 	"""
 	return sum([ t[1] for t in tuple_ndarray])
+
+
+"""
+VALIDATION
+"""
+def check_scenario(vectors, uvc, blacklist, remaining_mines, remaining_tiles, s):
+	# we want to skip any scenarios that don't assume a mine
+			# on a tile that already has a mine
+	if sum(s) > remaining_mines:
+		return None
+	scenario = zip(uvc,s)
+	for tile in scenario:
+		if (tile[0] in blacklist) & (tile[1] == 0):
+			return None
+		
+	valid = is_valid_state(vectors, scenario, remaining_mines, remaining_tiles)
+
+	if valid:
+		print(scenario)
+		return scenario
+	else:
+		return None
+
+
+def is_valid_state(vectors, scenario, remaining_mines, remaining_tiles):
+	# if np.random.rand() < 0.001:
+	# 	print('Vectors', vectors)
+	# 	print('scenario', scenario)
+	# 	print('mines and tiles', remaining_mines, remaining_tiles)
+
+	scenario_mines = sum([ s[1] for s in scenario ])
+	if scenario_mines > remaining_mines:
+		return False
+	# invalid scenario if all remaining tiles must be mines, but the scenario
+	# doesn't place all mines
+	if (remaining_tiles == remaining_mines != scenario_mines):
+		return False
+
+	# invalid scenario if we don't satify a given vectors condition (e.g. number
+	# of mines place)
+	for vector in vectors:
+		coords = vector['vector']
+		vector_mines = sum([ s[1] for s in scenario if s[0] in coords ])
+		if vector['mines'] != vector_mines:
+			return False
+
+	# invalid scenario if the (remaining tiles - tiles in scenario) is less than
+	# the (remaining mines - mines in scenario)
+	scenario_tiles = len(scenario)
+	if ((remaining_tiles - scenario_tiles) < (remaining_mines - scenario_mines)):
+		return False
+
+	# scenario has passed all checks
+	return True
+
+
+
+
+
+
