@@ -48,6 +48,7 @@ class Solver:
 		problem = Problem()
 		self.add_variables(problem, uvc)
 		self.add_contraints(problem, vectors)
+		print(problem.getSolutions())
 		return self.combine_solutions(problem.getSolutions())
 
 	def add_variables(self, problem, variables):
@@ -105,17 +106,3 @@ class Solver:
 			result[key] = result[key] / len(solutions)
 
 		return result
-
-
-# vectors = [{'root': [3, 2], 'vector': [(2, 1), (2, 3), (2, 2)], 'mines': 2},
-# 			{'root': [3, 3], 'vector': [(2, 4), (2, 3), (2, 2)], 'mines': 1},
-# 			{'root': [3, 4], 'vector': [(2, 4), (2, 3), (2, 5)], 'mines': 2},
-# 			{'root': [3, 5], 'vector': [(2, 4), (2, 6), (2, 5)], 'mines': 1},
-# 			{'root': [4, 6], 'vector': [(3, 7), (5, 7), (4, 7)], 'mines': 1},
-# 			{'root': [5, 6], 'vector': [(5, 7), (6, 7), (4, 7)], 'mines': 1},
-# 			{'root': [6, 1], 'vector': [(7, 1), (7, 0), (5, 0), (6, 0)], 'mines': 0}, 
-# 			{'root': [6, 6], 'vector': [(7, 7), (5, 7), (6, 7)], 'mines': 0},
-# 			{'root': [7, 5], 'vector': [(8, 6)], 'mines': 0}]
-
-# solver = Solver(vectors)
-# print(solver.get_solutions())
